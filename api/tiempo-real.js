@@ -1,5 +1,7 @@
 // api/tiempo-real.js
-// Backend serverless para Vercel. Oculta TOMTOM_API_KEY y consulta TomTom + Open-Meteo.
+// Backend serverless para Vercel.
+// Tiempo real: TomTom para tráfico actual y OpenWeather para clima actual.
+// Open-Meteo queda fuera del flujo actual principal.
 
 const PUNTOS_CARRETERAS = [
   { COD_CARRETERA: "PE-1N", nombre: "Panamericana Norte - Lima", departamento: "LIMA", lat: -11.8715, lon: -77.0767 },
@@ -15,6 +17,15 @@ function aplicarCors(res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Cache-Control", "no-store");
+}
+
+function obtenerOpenWeatherKey() {
+  return (
+    process.env.OPENWEATHER_API_KEY ||
+    process.env.OPENWEATHER_KEY ||
+    process.env.WEATHER_API_KEY ||
+    ""
+  );
 }
 
 async function fetchConTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
@@ -55,6 +66,7 @@ async function obtenerTomTom(lat, lon) {
 
     return {
       disponible: true,
+      fuente_trafico: "tomtom_current",
       currentSpeed,
       freeFlowSpeed,
       currentTravelTime,
@@ -66,51 +78,80 @@ async function obtenerTomTom(lat, lon) {
   } catch (error) {
     return {
       disponible: false,
+      fuente_trafico: "tomtom_current",
       error: error.name === "AbortError" ? "TomTom timeout" : error.message
     };
   }
 }
 
-async function obtenerOpenMeteo(lat, lon) {
+async function obtenerOpenWeatherActual(lat, lon) {
+  const apiKey = obtenerOpenWeatherKey();
+
+  if (!apiKey) {
+    return {
+      disponible: false,
+      fuente_clima: "openweather_current",
+      error: "Falta OPENWEATHER_API_KEY en variables de entorno de Vercel"
+    };
+  }
+
   const params = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lon),
-    current: [
-      "temperature_2m",
-      "relative_humidity_2m",
-      "precipitation",
-      "rain",
-      "cloud_cover",
-      "wind_speed_10m",
-      "wind_gusts_10m"
-    ].join(","),
-    timezone: "America/Lima"
+    lat: String(lat),
+    lon: String(lon),
+    appid: apiKey,
+    units: "metric",
+    lang: "es"
   });
 
-  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+  const url = `https://api.openweathermap.org/data/2.5/weather?${params.toString()}`;
 
   try {
     const response = await fetchConTimeout(url);
-    if (!response.ok) return { disponible: false, error: `Open-Meteo error ${response.status}` };
+
+    if (!response.ok) {
+      let detalle = "";
+      try {
+        const errorBody = await response.json();
+        detalle = errorBody.message ? `: ${errorBody.message}` : "";
+      } catch (_) {}
+
+      return {
+        disponible: false,
+        fuente_clima: "openweather_current",
+        error: `OpenWeather error ${response.status}${detalle}`
+      };
+    }
 
     const data = await response.json();
-    const current = data.current || {};
+    const main = data.main || {};
+    const rain = data.rain || {};
+    const clouds = data.clouds || {};
+    const wind = data.wind || {};
+    const weather = Array.isArray(data.weather) && data.weather.length > 0 ? data.weather[0] : {};
+
+    const vientoMs = Number(wind.speed ?? 0);
+    const rachaMs = Number(wind.gust ?? 0);
 
     return {
       disponible: true,
-      fecha_hora_clima: current.time || null,
-      om_temperatura_c: Number(current.temperature_2m ?? 0),
-      om_humedad_pct: Number(current.relative_humidity_2m ?? 0),
-      om_precipitacion_mm: Number(current.precipitation ?? 0),
-      om_lluvia_mm: Number(current.rain ?? 0),
-      om_nubosidad_pct: Number(current.cloud_cover ?? 0),
-      om_viento_kmh: Number(current.wind_speed_10m ?? 0),
-      om_racha_viento_kmh: Number(current.wind_gusts_10m ?? 0)
+      fuente_clima: "openweather_current",
+      fecha_hora_clima: data.dt ? new Date(Number(data.dt) * 1000).toISOString() : null,
+      descripcion_clima: weather.description || weather.main || null,
+      om_temperatura_c: Number(main.temp ?? 0),
+      om_humedad_pct: Number(main.humidity ?? 0),
+      om_precipitacion_mm: Number(rain["1h"] ?? rain["3h"] ?? 0),
+      om_lluvia_mm: Number(rain["1h"] ?? rain["3h"] ?? 0),
+      om_nubosidad_pct: Number(clouds.all ?? 0),
+      om_viento_kmh: Number((vientoMs * 3.6).toFixed(2)),
+      om_racha_viento_kmh: Number((rachaMs * 3.6).toFixed(2)),
+      ow_presion_hpa: Number(main.pressure ?? 0),
+      ow_sensacion_termica_c: Number(main.feels_like ?? 0)
     };
   } catch (error) {
     return {
       disponible: false,
-      error: error.name === "AbortError" ? "Open-Meteo timeout" : error.message
+      fuente_clima: "openweather_current",
+      error: error.name === "AbortError" ? "OpenWeather timeout" : error.message
     };
   }
 }
@@ -154,7 +195,7 @@ function calcularRiesgoActual(tomtom, clima) {
 async function obtenerDatosPunto(punto) {
   const [tomtom, clima] = await Promise.all([
     obtenerTomTom(punto.lat, punto.lon),
-    obtenerOpenMeteo(punto.lat, punto.lon)
+    obtenerOpenWeatherActual(punto.lat, punto.lon)
   ]);
 
   const riesgo = calcularRiesgoActual(tomtom, clima);
@@ -168,6 +209,7 @@ async function obtenerDatosPunto(punto) {
     actualizado_en: new Date().toISOString(),
     ...riesgo,
     tomtom_disponible: tomtom.disponible,
+    fuente_trafico: tomtom.fuente_trafico ?? "tomtom_current",
     tomtom_error: tomtom.error ?? null,
     currentSpeed: tomtom.currentSpeed ?? null,
     freeFlowSpeed: tomtom.freeFlowSpeed ?? null,
@@ -176,7 +218,9 @@ async function obtenerDatosPunto(punto) {
     confidence: tomtom.confidence ?? null,
     roadClosure: tomtom.roadClosure ?? false,
     clima_disponible: clima.disponible,
+    fuente_clima: clima.fuente_clima ?? "openweather_current",
     clima_error: clima.error ?? null,
+    descripcion_clima: clima.descripcion_clima ?? null,
     fecha_hora_clima: clima.fecha_hora_clima ?? null,
     om_temperatura_c: clima.om_temperatura_c ?? null,
     om_humedad_pct: clima.om_humedad_pct ?? null,
@@ -184,7 +228,9 @@ async function obtenerDatosPunto(punto) {
     om_lluvia_mm: clima.om_lluvia_mm ?? null,
     om_nubosidad_pct: clima.om_nubosidad_pct ?? null,
     om_viento_kmh: clima.om_viento_kmh ?? null,
-    om_racha_viento_kmh: clima.om_racha_viento_kmh ?? null
+    om_racha_viento_kmh: clima.om_racha_viento_kmh ?? null,
+    ow_presion_hpa: clima.ow_presion_hpa ?? null,
+    ow_sensacion_termica_c: clima.ow_sensacion_termica_c ?? null
   };
 }
 
@@ -200,6 +246,12 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       actualizado_en: new Date().toISOString(),
+      proveedor_trafico: "TomTom Traffic Flow actual",
+      proveedor_clima: "OpenWeather Current Weather actual",
+      requiere_env: {
+        TOMTOM_API_KEY: Boolean(process.env.TOMTOM_API_KEY),
+        OPENWEATHER_API_KEY: Boolean(obtenerOpenWeatherKey())
+      },
       total_puntos: resultados.length,
       data: resultados
     });
