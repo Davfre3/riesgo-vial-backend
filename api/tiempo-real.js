@@ -8,11 +8,27 @@ const PUNTOS_CARRETERAS = [
   { COD_CARRETERA: "PE-34", nombre: "Carretera PE-34", departamento: "PUNO", lat: -15.8402, lon: -70.0219 }
 ];
 
+const FETCH_TIMEOUT_MS = 7000;
+
 function aplicarCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Cache-Control", "no-store");
+}
+
+async function fetchConTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function obtenerTomTom(lat, lon) {
@@ -22,7 +38,7 @@ async function obtenerTomTom(lat, lon) {
   const url = `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=${apiKey}&point=${lat},${lon}&unit=KMPH`;
 
   try {
-    const response = await fetch(url);
+    const response = await fetchConTimeout(url);
     if (!response.ok) return { disponible: false, error: `TomTom error ${response.status}` };
 
     const data = await response.json();
@@ -48,7 +64,10 @@ async function obtenerTomTom(lat, lon) {
       congestionRatio
     };
   } catch (error) {
-    return { disponible: false, error: error.message };
+    return {
+      disponible: false,
+      error: error.name === "AbortError" ? "TomTom timeout" : error.message
+    };
   }
 }
 
@@ -68,8 +87,10 @@ async function obtenerOpenMeteo(lat, lon) {
     timezone: "America/Lima"
   });
 
+  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+
   try {
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+    const response = await fetchConTimeout(url);
     if (!response.ok) return { disponible: false, error: `Open-Meteo error ${response.status}` };
 
     const data = await response.json();
@@ -78,16 +99,19 @@ async function obtenerOpenMeteo(lat, lon) {
     return {
       disponible: true,
       fecha_hora_clima: current.time || null,
-      om_temperatura_c: Number(current.temperature_2m || 0),
-      om_humedad_pct: Number(current.relative_humidity_2m || 0),
-      om_precipitacion_mm: Number(current.precipitation || 0),
-      om_lluvia_mm: Number(current.rain || 0),
-      om_nubosidad_pct: Number(current.cloud_cover || 0),
-      om_viento_kmh: Number(current.wind_speed_10m || 0),
-      om_racha_viento_kmh: Number(current.wind_gusts_10m || 0)
+      om_temperatura_c: Number(current.temperature_2m ?? 0),
+      om_humedad_pct: Number(current.relative_humidity_2m ?? 0),
+      om_precipitacion_mm: Number(current.precipitation ?? 0),
+      om_lluvia_mm: Number(current.rain ?? 0),
+      om_nubosidad_pct: Number(current.cloud_cover ?? 0),
+      om_viento_kmh: Number(current.wind_speed_10m ?? 0),
+      om_racha_viento_kmh: Number(current.wind_gusts_10m ?? 0)
     };
   } catch (error) {
-    return { disponible: false, error: error.message };
+    return {
+      disponible: false,
+      error: error.name === "AbortError" ? "Open-Meteo timeout" : error.message
+    };
   }
 }
 
@@ -127,48 +151,51 @@ function calcularRiesgoActual(tomtom, clima) {
   };
 }
 
+async function obtenerDatosPunto(punto) {
+  const [tomtom, clima] = await Promise.all([
+    obtenerTomTom(punto.lat, punto.lon),
+    obtenerOpenMeteo(punto.lat, punto.lon)
+  ]);
+
+  const riesgo = calcularRiesgoActual(tomtom, clima);
+
+  return {
+    COD_CARRETERA: punto.COD_CARRETERA,
+    nombre: punto.nombre,
+    DEPARTAMENTO: punto.departamento,
+    lat: punto.lat,
+    lon: punto.lon,
+    actualizado_en: new Date().toISOString(),
+    ...riesgo,
+    tomtom_disponible: tomtom.disponible,
+    tomtom_error: tomtom.error ?? null,
+    currentSpeed: tomtom.currentSpeed ?? null,
+    freeFlowSpeed: tomtom.freeFlowSpeed ?? null,
+    currentTravelTime: tomtom.currentTravelTime ?? null,
+    freeFlowTravelTime: tomtom.freeFlowTravelTime ?? null,
+    confidence: tomtom.confidence ?? null,
+    roadClosure: tomtom.roadClosure ?? false,
+    clima_disponible: clima.disponible,
+    clima_error: clima.error ?? null,
+    fecha_hora_clima: clima.fecha_hora_clima ?? null,
+    om_temperatura_c: clima.om_temperatura_c ?? null,
+    om_humedad_pct: clima.om_humedad_pct ?? null,
+    om_precipitacion_mm: clima.om_precipitacion_mm ?? null,
+    om_lluvia_mm: clima.om_lluvia_mm ?? null,
+    om_nubosidad_pct: clima.om_nubosidad_pct ?? null,
+    om_viento_kmh: clima.om_viento_kmh ?? null,
+    om_racha_viento_kmh: clima.om_racha_viento_kmh ?? null
+  };
+}
+
 export default async function handler(req, res) {
   aplicarCors(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Método no permitido" });
 
   try {
-    const resultados = [];
-
-    for (const punto of PUNTOS_CARRETERAS) {
-      const [tomtom, clima] = await Promise.all([
-        obtenerTomTom(punto.lat, punto.lon),
-        obtenerOpenMeteo(punto.lat, punto.lon)
-      ]);
-
-      const riesgo = calcularRiesgoActual(tomtom, clima);
-
-      resultados.push({
-        COD_CARRETERA: punto.COD_CARRETERA,
-        nombre: punto.nombre,
-        DEPARTAMENTO: punto.departamento,
-        lat: punto.lat,
-        lon: punto.lon,
-        actualizado_en: new Date().toISOString(),
-        ...riesgo,
-        tomtom_disponible: tomtom.disponible,
-        currentSpeed: tomtom.currentSpeed ?? null,
-        freeFlowSpeed: tomtom.freeFlowSpeed ?? null,
-        currentTravelTime: tomtom.currentTravelTime ?? null,
-        freeFlowTravelTime: tomtom.freeFlowTravelTime ?? null,
-        confidence: tomtom.confidence ?? null,
-        roadClosure: tomtom.roadClosure ?? false,
-        clima_disponible: clima.disponible,
-        fecha_hora_clima: clima.fecha_hora_clima ?? null,
-        om_temperatura_c: clima.om_temperatura_c ?? null,
-        om_humedad_pct: clima.om_humedad_pct ?? null,
-        om_precipitacion_mm: clima.om_precipitacion_mm ?? null,
-        om_lluvia_mm: clima.om_lluvia_mm ?? null,
-        om_nubosidad_pct: clima.om_nubosidad_pct ?? null,
-        om_viento_kmh: clima.om_viento_kmh ?? null,
-        om_racha_viento_kmh: clima.om_racha_viento_kmh ?? null
-      });
-    }
+    const resultados = await Promise.all(PUNTOS_CARRETERAS.map(obtenerDatosPunto));
 
     return res.status(200).json({
       ok: true,
