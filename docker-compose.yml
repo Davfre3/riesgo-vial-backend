@@ -8,4 +8,6 @@ services:
       - "8080:8080"
     env_file:
       - ./model_service/.env
+    volumes:
+      - ./model_service/artifacts:/app/artifacts
     restart: unless-stopped
