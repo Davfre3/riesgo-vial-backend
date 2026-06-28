@@ -1,7 +1,8 @@
 // api/tiempo-real.js
 // Backend serverless para Vercel.
 // Tiempo real: TomTom para tráfico actual y OpenWeather para clima actual.
-// Open-Meteo queda fuera del flujo actual principal.
+// Si MODEL_API_URL está configurado, envía los datos actuales al servicio Python/Spark
+// para ejecutar el PipelineModel MLlib real.
 
 const PUNTOS_CARRETERAS = [
   { COD_CARRETERA: "PE-1N", nombre: "Panamericana Norte - Lima", departamento: "LIMA", lat: -11.8715, lon: -77.0767 },
@@ -11,6 +12,7 @@ const PUNTOS_CARRETERAS = [
 ];
 
 const FETCH_TIMEOUT_MS = 7000;
+const MODEL_TIMEOUT_MS = 20000;
 
 function aplicarCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -31,12 +33,8 @@ function obtenerOpenWeatherKey() {
 async function fetchConTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
+    return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -156,7 +154,7 @@ async function obtenerOpenWeatherActual(lat, lon) {
   }
 }
 
-function calcularRiesgoActual(tomtom, clima) {
+function calcularRiesgoRegla(tomtom, clima) {
   let factorCongestion = 0;
   let factorClima = 0;
 
@@ -188,7 +186,9 @@ function calcularRiesgoActual(tomtom, clima) {
     score_actual_html: Number(scoreActual.toFixed(4)),
     factor_congestion_html: Number(factorCongestion.toFixed(4)),
     factor_clima_html: Number(factorClima.toFixed(4)),
-    NIVEL_RIESGO_ACTUAL: nivel
+    NIVEL_RIESGO_ACTUAL: nivel,
+    modelo_disponible: false,
+    fuente_prediccion: "regla_respaldo"
   };
 }
 
@@ -198,7 +198,7 @@ async function obtenerDatosPunto(punto) {
     obtenerOpenWeatherActual(punto.lat, punto.lon)
   ]);
 
-  const riesgo = calcularRiesgoActual(tomtom, clima);
+  const riesgoRegla = calcularRiesgoRegla(tomtom, clima);
 
   return {
     COD_CARRETERA: punto.COD_CARRETERA,
@@ -207,7 +207,7 @@ async function obtenerDatosPunto(punto) {
     lat: punto.lat,
     lon: punto.lon,
     actualizado_en: new Date().toISOString(),
-    ...riesgo,
+    ...riesgoRegla,
     tomtom_disponible: tomtom.disponible,
     fuente_trafico: tomtom.fuente_trafico ?? "tomtom_current",
     tomtom_error: tomtom.error ?? null,
@@ -234,6 +234,80 @@ async function obtenerDatosPunto(punto) {
   };
 }
 
+async function aplicarModeloMLlib(resultados) {
+  const modelApiUrl = process.env.MODEL_API_URL;
+  if (!modelApiUrl) {
+    return {
+      resultados,
+      modelo: {
+        usado: false,
+        motivo: "Falta MODEL_API_URL. Se usa regla de respaldo."
+      }
+    };
+  }
+
+  try {
+    const response = await fetchConTimeout(
+      `${modelApiUrl.replace(/\/$/, "")}/predict`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: resultados })
+      },
+      MODEL_TIMEOUT_MS
+    );
+
+    if (!response.ok) {
+      return {
+        resultados,
+        modelo: {
+          usado: false,
+          motivo: `MODEL_API_URL respondió ${response.status}. Se usa regla de respaldo.`
+        }
+      };
+    }
+
+    const body = await response.json();
+    const predicciones = Array.isArray(body.predicciones) ? body.predicciones : [];
+    const porCodigo = new Map(predicciones.map(p => [String(p.COD_CARRETERA || "").toUpperCase(), p]));
+
+    const mezclados = resultados.map(row => {
+      const pred = porCodigo.get(String(row.COD_CARRETERA || "").toUpperCase());
+      if (!pred) return row;
+
+      return {
+        ...row,
+        modelo_disponible: true,
+        fuente_prediccion: "mllib_pipeline_backend",
+        modelo_prediccion_label: pred.prediction,
+        modelo_nivel_riesgo: pred.NIVEL_RIESGO_ACTUAL,
+        modelo_probabilidades: pred.probabilidades ?? null,
+        modelo_motivo: pred.motivo ?? "Predicción generada por PipelineModel MLlib.",
+        NIVEL_RIESGO_ACTUAL: pred.NIVEL_RIESGO_ACTUAL || row.NIVEL_RIESGO_ACTUAL,
+        score_actual_html: Number(pred.score_actual_html ?? row.score_actual_html ?? 0)
+      };
+    });
+
+    return {
+      resultados: mezclados,
+      modelo: {
+        usado: true,
+        url_configurada: true,
+        total_predicciones: predicciones.length,
+        detalle: body.detalle ?? "Predicción realizada por servicio MLlib."
+      }
+    };
+  } catch (error) {
+    return {
+      resultados,
+      modelo: {
+        usado: false,
+        motivo: `Error llamando MODEL_API_URL: ${error.message}. Se usa regla de respaldo.`
+      }
+    };
+  }
+}
+
 export default async function handler(req, res) {
   aplicarCors(res);
 
@@ -241,19 +315,23 @@ export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Método no permitido" });
 
   try {
-    const resultados = await Promise.all(PUNTOS_CARRETERAS.map(obtenerDatosPunto));
+    const datosApi = await Promise.all(PUNTOS_CARRETERAS.map(obtenerDatosPunto));
+    const prediccion = await aplicarModeloMLlib(datosApi);
 
     return res.status(200).json({
       ok: true,
       actualizado_en: new Date().toISOString(),
       proveedor_trafico: "TomTom Traffic Flow actual",
       proveedor_clima: "OpenWeather Current Weather actual",
+      proveedor_modelo: prediccion.modelo.usado ? "Spark MLlib PipelineModel" : "regla de respaldo sin MLlib",
       requiere_env: {
         TOMTOM_API_KEY: Boolean(process.env.TOMTOM_API_KEY),
-        OPENWEATHER_API_KEY: Boolean(obtenerOpenWeatherKey())
+        OPENWEATHER_API_KEY: Boolean(obtenerOpenWeatherKey()),
+        MODEL_API_URL: Boolean(process.env.MODEL_API_URL)
       },
-      total_puntos: resultados.length,
-      data: resultados
+      modelo: prediccion.modelo,
+      total_puntos: prediccion.resultados.length,
+      data: prediccion.resultados
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
