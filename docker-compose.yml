@@ -1,0 +1,11 @@
+services:
+  riesgo-vial-mllib:
+    build:
+      context: ./model_service
+      dockerfile: Dockerfile
+    container_name: riesgo-vial-mllib
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./model_service/.env
+    restart: unless-stopped
