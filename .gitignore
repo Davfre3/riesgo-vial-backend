@@ -1,0 +1,6 @@
+model_service/.env
+model_service/artifacts/*
+!model_service/artifacts/.gitkeep
+__pycache__/
+*.pyc
+.DS_Store
