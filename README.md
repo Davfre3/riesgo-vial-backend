@@ -1,57 +1,65 @@
 # Riesgo Vial Backend
 
-Backend serverless para Vercel. Consulta TomTom y Open-Meteo en tiempo real y entrega un JSON para el mapa de riesgo vial.
+Backend para riesgo vial en tiempo real. Puede ejecutarse localmente con Docker y expone datos de TomTom, OpenWeather y el modelo Spark MLlib para que el mapa los consuma.
 
-## Estructura
+## Levantar con Docker
+
+1. Copia las variables de entorno:
+
+```powershell
+cp model_service/.env.example model_service/.env
+```
+
+2. Edita `model_service/.env` y coloca tus claves:
 
 ```text
-package.json
-api/
-  tiempo-real.js
+TOMTOM_API_KEY=tu_key_tomtom
+OPENWEATHER_API_KEY=tu_key_openweather
 ```
 
-## Variable de entorno obligatoria
-
-En Vercel debes configurar:
+3. Verifica que existan los artifacts del modelo:
 
 ```text
-TOMTOM_API_KEY
+model_service/artifacts/modelo_riesgo_vial_pipeline/
+model_service/artifacts/schema_inferencia.json
+model_service/artifacts/historico_features_para_backend.json
+model_service/artifacts/zonas_tiempo_real.json
 ```
 
-No subas tu clave al repositorio.
+4. Levanta el servicio:
 
-## Endpoint
+```powershell
+docker compose up --build
+```
 
-Cuando despliegues este repositorio en Vercel, tendrás una URL parecida a:
+5. Prueba el endpoint:
 
 ```text
-https://riesgo-vial-backend.vercel.app/api/tiempo-real
+http://localhost:8080/api/tiempo-real
 ```
 
-La respuesta tendrá esta forma:
+El endpoint usa zonas de tiempo real y cache por 5 minutos para evitar demasiadas llamadas a TomTom/OpenWeather.
 
-```json
-{
-  "ok": true,
-  "actualizado_en": "2026-06-27T15:00:00.000Z",
-  "total_puntos": 4,
-  "data": [
-    {
-      "COD_CARRETERA": "PE-1S",
-      "NIVEL_RIESGO_ACTUAL": "MEDIO",
-      "score_actual_html": 0.35,
-      "currentSpeed": 42,
-      "freeFlowSpeed": 70,
-      "om_temperatura_c": 18.5,
-      "om_lluvia_mm": 0
-    }
-  ]
-}
+## Endpoints
+
+```text
+GET /                    salud del servicio
+GET /api/tiempo-real     datos por zonas para el mapa
+GET /api/tiempo-real-punto?codigo=...&lat=...&lon=... consulta puntual opcional
+POST /predict            prediccion con filas enviadas manualmente
 ```
 
-## Pasos en Vercel
+## Regenerar zonas
 
-1. Importa este repositorio en Vercel.
-2. En Settings → Environment Variables agrega `TOMTOM_API_KEY`.
-3. Despliega.
-4. Copia la URL final del endpoint y úsala en el repo del mapa.
+Si actualizas el GeoJSON del mapa, regenera las zonas desde la raiz del backend:
+
+```powershell
+node scripts\generar_puntos_carreteras.cjs
+node scripts\generar_zonas_tiempo_real.cjs
+```
+
+Luego reinicia Docker:
+
+```powershell
+docker compose restart riesgo-vial-mllib
+```

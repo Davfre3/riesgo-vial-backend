@@ -1,6 +1,8 @@
 model_service/.env
 model_service/artifacts/*
 !model_service/artifacts/.gitkeep
+!model_service/artifacts/zonas_tiempo_real.json
 __pycache__/
 *.pyc
 .DS_Store
+riesgo-vial-mapa/

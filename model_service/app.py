@@ -14,14 +14,17 @@ from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 MODEL_PATH = os.getenv("MODEL_PATH", "./modelo_riesgo_vial_pipeline")
 SCHEMA_PATH = os.getenv("SCHEMA_PATH", "./schema_inferencia.json")
 HISTORICO_PATH = os.getenv("HISTORICO_FEATURES_PATH", "./historico_features_para_backend.json")
+ZONAS_PATH = os.getenv("ZONAS_TIEMPO_REAL_PATH", "./zonas_tiempo_real.json")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", os.getenv("OPENWEATHER_KEY", ""))
+TIEMPO_REAL_CACHE_TTL = int(os.getenv("TIEMPO_REAL_CACHE_TTL", "300"))
 
 PUNTOS_CARRETERAS = [
     {"COD_CARRETERA": "PE-1N", "nombre": "Panamericana Norte - Lima", "DEPARTAMENTO": "LIMA", "lat": -11.8715, "lon": -77.0767},
     {"COD_CARRETERA": "PE-1S", "nombre": "Panamericana Sur - Lima", "DEPARTAMENTO": "LIMA", "lat": -12.1736, "lon": -76.9561},
     {"COD_CARRETERA": "PE-22", "nombre": "Carretera Central", "DEPARTAMENTO": "LIMA", "lat": -12.0191, "lon": -76.8227},
     {"COD_CARRETERA": "PE-34", "nombre": "Carretera PE-34", "DEPARTAMENTO": "PUNO", "lat": -15.8402, "lon": -70.0219},
+    {"COD_CARRETERA": "LI-500", "nombre": "Avenida Las Flores", "DEPARTAMENTO": "LAMBAYEQUE", "lat": -7.1732, "lon": -79.5320},
 ]
 
 app = FastAPI(title="Riesgo Vial MLlib API")
@@ -36,10 +39,24 @@ spark = None
 model = None
 schema_cfg = None
 historico_por_codigo: Dict[str, Dict[str, Any]] = {}
+tiempo_real_cache: Dict[str, Any] = {"ts": 0, "payload": None}
 
 
 class PredictRequest(BaseModel):
     rows: List[Dict[str, Any]]
+
+
+def enriquecer_punto(punto: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(punto)
+    row.update(obtener_tomtom(safe_float(punto.get("lat")), safe_float(punto.get("lon"))))
+    row.update(obtener_openweather(safe_float(punto.get("lat")), safe_float(punto.get("lon"))))
+    row["factor_clima_html"] = round(calcular_factor_clima(row), 4)
+    row["score_actual_html"] = calcular_score_actual(row)
+    row["actualizado_en"] = int(time.time())
+    predicciones = predecir_rows([row])
+    if predicciones:
+        row.update(predicciones[0])
+    return row
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
@@ -49,6 +66,15 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def cargar_puntos_monitoreo() -> List[Dict[str, Any]]:
+    if os.path.exists(ZONAS_PATH):
+        with open(ZONAS_PATH, "r", encoding="utf-8") as f:
+            zonas = json.load(f)
+        if isinstance(zonas, list) and zonas:
+            return zonas
+    return PUNTOS_CARRETERAS
 
 
 def cargar_recursos() -> None:
@@ -158,6 +184,14 @@ def calcular_factor_clima(row: Dict[str, Any]) -> float:
     return max(0, min(1, factor))
 
 
+def calcular_score_actual(row: Dict[str, Any]) -> float:
+    congestion = safe_float(row.get("factor_congestion_html"))
+    clima = safe_float(row.get("factor_clima_html"))
+    if row.get("roadClosure"):
+        congestion = 1.0
+    return round(max(0, min(1, 0.65 * congestion + 0.35 * clima)), 4)
+
+
 def construir_fila(row_actual: Dict[str, Any]) -> Dict[str, Any]:
     codigo = str(row_actual.get("COD_CARRETERA", "")).upper()
     base = dict(historico_por_codigo.get(codigo, {}))
@@ -219,7 +253,7 @@ def predecir_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "COD_CARRETERA": d.get("COD_CARRETERA"),
             "prediction": pred_idx,
             "NIVEL_RIESGO_ACTUAL": nivel,
-            "score_actual_html": score,
+            "modelo_confianza": score,
             "probabilidades": probs,
             "modelo_disponible": True,
             "fuente_prediccion": "mllib_pipeline_docker",
@@ -239,14 +273,32 @@ def predict(payload: PredictRequest) -> Dict[str, Any]:
     return {"ok": True, "predicciones": predecir_rows(payload.rows), "detalle": "Predicción realizada por Spark MLlib PipelineModel."}
 
 
+@app.get("/api/tiempo-real-punto")
+def tiempo_real_punto(codigo: str, lat: float, lon: float, departamento: str = "") -> Dict[str, Any]:
+    punto = {
+        "COD_CARRETERA": codigo.upper(),
+        "nombre": codigo.upper(),
+        "DEPARTAMENTO": departamento or "SIN DEPARTAMENTO",
+        "lat": lat,
+        "lon": lon,
+    }
+    return {"ok": True, "data": enriquecer_punto(punto)}
+
+
 @app.get("/api/tiempo-real")
 def tiempo_real() -> Dict[str, Any]:
+    ahora = time.time()
+    if tiempo_real_cache["payload"] is not None and ahora - tiempo_real_cache["ts"] < TIEMPO_REAL_CACHE_TTL:
+        return tiempo_real_cache["payload"]
+
+    puntos = cargar_puntos_monitoreo()
     filas = []
-    for punto in PUNTOS_CARRETERAS:
+    for punto in puntos:
         row = dict(punto)
         row.update(obtener_tomtom(punto["lat"], punto["lon"]))
         row.update(obtener_openweather(punto["lat"], punto["lon"]))
         row["factor_clima_html"] = round(calcular_factor_clima(row), 4)
+        row["score_actual_html"] = calcular_score_actual(row)
         row["actualizado_en"] = int(time.time())
         filas.append(row)
 
@@ -258,11 +310,13 @@ def tiempo_real() -> Dict[str, Any]:
         pred = pred_por_codigo.get(str(row.get("COD_CARRETERA", "")).upper(), {})
         data.append({**row, **pred})
 
-    return {
+    payload = {
         "ok": True,
         "proveedor_trafico": "TomTom Traffic Flow actual",
         "proveedor_clima": "OpenWeather Current Weather actual",
         "proveedor_modelo": "Spark MLlib PipelineModel en Docker",
+        "modo_actualizacion": "zonas",
+        "cache_ttl_segundos": TIEMPO_REAL_CACHE_TTL,
         "requiere_env": {
             "TOMTOM_API_KEY": bool(TOMTOM_API_KEY),
             "OPENWEATHER_API_KEY": bool(OPENWEATHER_API_KEY),
@@ -270,3 +324,6 @@ def tiempo_real() -> Dict[str, Any]:
         "total_puntos": len(data),
         "data": data,
     }
+    tiempo_real_cache["ts"] = ahora
+    tiempo_real_cache["payload"] = payload
+    return payload

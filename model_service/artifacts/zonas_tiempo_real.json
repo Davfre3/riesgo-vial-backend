@@ -1,0 +1,242 @@
+[
+  {
+    "COD_CARRETERA": "ZONA-AMAZONAS",
+    "nombre": "Zona AMAZONAS (AM-109)",
+    "DEPARTAMENTO": "AMAZONAS",
+    "tipo_punto": "zona",
+    "punto_representativo": "AM-109",
+    "carreteras_representadas": 8,
+    "lat": -6.227462,
+    "lon": -77.874269
+  },
+  {
+    "COD_CARRETERA": "ZONA-ANCASH",
+    "nombre": "Zona ANCASH (AN-770)",
+    "DEPARTAMENTO": "ANCASH",
+    "tipo_punto": "zona",
+    "punto_representativo": "AN-770",
+    "carreteras_representadas": 23,
+    "lat": -9.3265,
+    "lon": -77.54555
+  },
+  {
+    "COD_CARRETERA": "ZONA-APURIMAC",
+    "nombre": "Zona APURIMAC (AP-821)",
+    "DEPARTAMENTO": "APURIMAC",
+    "tipo_punto": "zona",
+    "punto_representativo": "AP-821",
+    "carreteras_representadas": 28,
+    "lat": -13.996,
+    "lon": -73.0945
+  },
+  {
+    "COD_CARRETERA": "ZONA-AREQUIPA",
+    "nombre": "Zona AREQUIPA (AR-733)",
+    "DEPARTAMENTO": "AREQUIPA",
+    "tipo_punto": "zona",
+    "punto_representativo": "AR-733",
+    "carreteras_representadas": 42,
+    "lat": -16.2935,
+    "lon": -72.112
+  },
+  {
+    "COD_CARRETERA": "ZONA-AYACUCHO",
+    "nombre": "Zona AYACUCHO (AY-990)",
+    "DEPARTAMENTO": "AYACUCHO",
+    "tipo_punto": "zona",
+    "punto_representativo": "AY-990",
+    "carreteras_representadas": 23,
+    "lat": -13.6075,
+    "lon": -74.11425
+  },
+  {
+    "COD_CARRETERA": "ZONA-CAJAMARCA",
+    "nombre": "Zona CAJAMARCA (CA-899)",
+    "DEPARTAMENTO": "CAJAMARCA",
+    "tipo_punto": "zona",
+    "punto_representativo": "CA-899",
+    "carreteras_representadas": 62,
+    "lat": -6.538286,
+    "lon": -78.656929
+  },
+  {
+    "COD_CARRETERA": "ZONA-CALLAO",
+    "nombre": "Zona CALLAO (CL-100)",
+    "DEPARTAMENTO": "CALLAO",
+    "tipo_punto": "zona",
+    "punto_representativo": "CL-100",
+    "carreteras_representadas": 1,
+    "lat": -12.07125,
+    "lon": -77.128938
+  },
+  {
+    "COD_CARRETERA": "ZONA-CUSCO",
+    "nombre": "Zona CUSCO (CU-117)",
+    "DEPARTAMENTO": "CUSCO",
+    "tipo_punto": "zona",
+    "punto_representativo": "CU-117",
+    "carreteras_representadas": 61,
+    "lat": -13.758966,
+    "lon": -71.842829
+  },
+  {
+    "COD_CARRETERA": "ZONA-HUANCAVELICA",
+    "nombre": "Zona HUANCAVELICA (HV-110)",
+    "DEPARTAMENTO": "HUANCAVELICA",
+    "tipo_punto": "zona",
+    "punto_representativo": "HV-110",
+    "carreteras_representadas": 24,
+    "lat": -12.489792,
+    "lon": -75.241604
+  },
+  {
+    "COD_CARRETERA": "ZONA-ICA",
+    "nombre": "Zona ICA (IC-671)",
+    "DEPARTAMENTO": "ICA",
+    "tipo_punto": "zona",
+    "punto_representativo": "IC-671",
+    "carreteras_representadas": 15,
+    "lat": -14.0782,
+    "lon": -75.7429
+  },
+  {
+    "COD_CARRETERA": "ZONA-JUNIN",
+    "nombre": "Zona JUNIN (JU-673)",
+    "DEPARTAMENTO": "JUNIN",
+    "tipo_punto": "zona",
+    "punto_representativo": "JU-673",
+    "carreteras_representadas": 15,
+    "lat": -11.678667,
+    "lon": -75.6555
+  },
+  {
+    "COD_CARRETERA": "ZONA-LAMBAYEQUE",
+    "nombre": "Zona LAMBAYEQUE (LI-874)",
+    "DEPARTAMENTO": "LAMBAYEQUE",
+    "tipo_punto": "zona",
+    "punto_representativo": "LI-874",
+    "carreteras_representadas": 107,
+    "lat": -7.7186,
+    "lon": -79.0682
+  },
+  {
+    "COD_CARRETERA": "ZONA-LIMA",
+    "nombre": "Zona LIMA (LM-678)",
+    "DEPARTAMENTO": "LIMA",
+    "tipo_punto": "zona",
+    "punto_representativo": "LM-678",
+    "carreteras_representadas": 28,
+    "lat": -11.485083,
+    "lon": -77.200917
+  },
+  {
+    "COD_CARRETERA": "ZONA-LORETO",
+    "nombre": "Zona LORETO (LO-508)",
+    "DEPARTAMENTO": "LORETO",
+    "tipo_punto": "zona",
+    "punto_representativo": "LO-508",
+    "carreteras_representadas": 2,
+    "lat": -3.794,
+    "lon": -73.3105
+  },
+  {
+    "COD_CARRETERA": "ZONA-MADRE-DE-DIOS",
+    "nombre": "Zona MADRE DE DIOS (MD-566)",
+    "DEPARTAMENTO": "MADRE DE DIOS",
+    "tipo_punto": "zona",
+    "punto_representativo": "MD-566",
+    "carreteras_representadas": 3,
+    "lat": -12.597455,
+    "lon": -69.193864
+  },
+  {
+    "COD_CARRETERA": "ZONA-MOQUEGUA",
+    "nombre": "Zona MOQUEGUA (MO-528)",
+    "DEPARTAMENTO": "MOQUEGUA",
+    "tipo_punto": "zona",
+    "punto_representativo": "MO-528",
+    "carreteras_representadas": 5,
+    "lat": -16.951429,
+    "lon": -70.829
+  },
+  {
+    "COD_CARRETERA": "ZONA-NACIONAL",
+    "nombre": "Zona NACIONAL (PE-22B)",
+    "DEPARTAMENTO": "NACIONAL",
+    "tipo_punto": "zona",
+    "punto_representativo": "PE-22B",
+    "carreteras_representadas": 125,
+    "lat": -11.237504,
+    "lon": -75.522571
+  },
+  {
+    "COD_CARRETERA": "ZONA-PASCO",
+    "nombre": "Zona PASCO (PA-545)",
+    "DEPARTAMENTO": "PASCO",
+    "tipo_punto": "zona",
+    "punto_representativo": "PA-545",
+    "carreteras_representadas": 9,
+    "lat": -10.5165,
+    "lon": -76.22
+  },
+  {
+    "COD_CARRETERA": "ZONA-PIURA",
+    "nombre": "Zona PIURA (PI-126)",
+    "DEPARTAMENTO": "PIURA",
+    "tipo_punto": "zona",
+    "punto_representativo": "PI-126",
+    "carreteras_representadas": 33,
+    "lat": -5.182667,
+    "lon": -80.612333
+  },
+  {
+    "COD_CARRETERA": "ZONA-PUNO",
+    "nombre": "Zona PUNO (PU-118)",
+    "DEPARTAMENTO": "PUNO",
+    "tipo_punto": "zona",
+    "punto_representativo": "PU-118",
+    "carreteras_representadas": 52,
+    "lat": -15.560763,
+    "lon": -69.954447
+  },
+  {
+    "COD_CARRETERA": "ZONA-SAN-MARTIN",
+    "nombre": "Zona SAN MARTIN (SM-100)",
+    "DEPARTAMENTO": "SAN MARTIN",
+    "tipo_punto": "zona",
+    "punto_representativo": "SM-100",
+    "carreteras_representadas": 9,
+    "lat": -6.314034,
+    "lon": -76.85431
+  },
+  {
+    "COD_CARRETERA": "ZONA-TACNA",
+    "nombre": "Zona TACNA (TA-619)",
+    "DEPARTAMENTO": "TACNA",
+    "tipo_punto": "zona",
+    "punto_representativo": "TA-619",
+    "carreteras_representadas": 22,
+    "lat": -17.975,
+    "lon": -70.232667
+  },
+  {
+    "COD_CARRETERA": "ZONA-TUMBES",
+    "nombre": "Zona TUMBES (TU-104)",
+    "DEPARTAMENTO": "TUMBES",
+    "tipo_punto": "zona",
+    "punto_representativo": "TU-104",
+    "carreteras_representadas": 7,
+    "lat": -3.6806,
+    "lon": -80.4359
+  },
+  {
+    "COD_CARRETERA": "ZONA-UCAYALI",
+    "nombre": "Zona UCAYALI (UC-103)",
+    "DEPARTAMENTO": "UCAYALI",
+    "tipo_punto": "zona",
+    "punto_representativo": "UC-103",
+    "carreteras_representadas": 2,
+    "lat": -8.3986,
+    "lon": -74.7164
+  }
+]
