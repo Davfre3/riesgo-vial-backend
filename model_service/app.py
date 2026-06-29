@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from glob import glob
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -77,6 +78,46 @@ def cargar_puntos_monitoreo() -> List[Dict[str, Any]]:
     return PUNTOS_CARRETERAS
 
 
+def leer_metadata_json(pattern: str) -> List[Dict[str, Any]]:
+    items = []
+    for path in glob(pattern):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                items.append(json.load(f))
+        except Exception:
+            continue
+    return items
+
+
+def sincronizar_schema_con_pipeline(schema: Dict[str, Any]) -> Dict[str, Any]:
+    metas = leer_metadata_json(os.path.join(MODEL_PATH, "stages", "*", "metadata", "part-*"))
+    assembler = next((m for m in metas if m.get("class", "").endswith("VectorAssembler")), None)
+    if not assembler:
+        return schema
+
+    input_cols = assembler.get("paramMap", {}).get("inputCols", [])
+    indexers = [
+        m.get("paramMap", {})
+        for m in metas
+        if m.get("class", "").endswith("StringIndexerModel")
+    ]
+    indexed_outputs = {i.get("outputCol") for i in indexers if i.get("outputCol")}
+    features_categoricas = [
+        i.get("inputCol")
+        for i in indexers
+        if i.get("inputCol") and i.get("outputCol") in input_cols
+    ]
+    features_numericas = [c for c in input_cols if c not in indexed_outputs]
+
+    if features_numericas:
+        schema = dict(schema)
+        schema["features_categoricas"] = features_categoricas
+        schema["features_numericas"] = features_numericas
+        schema["features_vector"] = input_cols
+        schema["schema_sincronizado_desde_pipeline"] = True
+    return schema
+
+
 def cargar_recursos() -> None:
     global spark, model, schema_cfg, historico_por_codigo
     if spark is not None and model is not None and schema_cfg is not None:
@@ -94,6 +135,7 @@ def cargar_recursos() -> None:
 
     with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
         schema_cfg = json.load(f)
+    schema_cfg = sincronizar_schema_con_pipeline(schema_cfg)
 
     if os.path.exists(HISTORICO_PATH):
         with open(HISTORICO_PATH, "r", encoding="utf-8") as f:
@@ -194,12 +236,23 @@ def calcular_score_actual(row: Dict[str, Any]) -> float:
 
 def construir_fila(row_actual: Dict[str, Any]) -> Dict[str, Any]:
     codigo = str(row_actual.get("COD_CARRETERA", "")).upper()
-    base = dict(historico_por_codigo.get(codigo, {}))
+    codigo_base = codigo
+    if codigo_base not in historico_por_codigo and row_actual.get("punto_representativo"):
+        codigo_base = str(row_actual.get("punto_representativo", "")).upper()
+    base = dict(historico_por_codigo.get(codigo_base, {}))
     base["COD_CARRETERA"] = codigo
+    base["COD_CARRETERA_BASE_MODELO"] = codigo_base
 
     for col in ["om_temperatura_c", "om_humedad_pct", "om_precipitacion_mm", "om_lluvia_mm", "om_nubosidad_pct", "om_viento_kmh", "om_racha_viento_kmh"]:
         if row_actual.get(col) is not None:
             base[col] = safe_float(row_actual.get(col))
+
+    if "TRAFICO_LIGERO_MENSUAL" not in base:
+        base["TRAFICO_LIGERO_MENSUAL"] = safe_float(base.get("TRAFICO_TOTAL_MENSUAL")) - safe_float(base.get("TRAFICO_PESADO_MENSUAL"))
+    if "RATIO_PESADOS_SEGURO" not in base:
+        base["RATIO_PESADOS_SEGURO"] = safe_float(base.get("TRAFICO_PESADO_MENSUAL")) / max(1.0, safe_float(base.get("TRAFICO_TOTAL_MENSUAL")))
+    if "ULTIMO_RIESGO_CONOCIDO" not in base:
+        base["ULTIMO_RIESGO_CONOCIDO"] = base.get("ultimo_riesgo_conocido") or base.get("NIVEL_RIESGO_ACTUAL") or "SIN_DATO"
 
     for c in schema_cfg.get("features_categoricas", []):
         base[c] = str(base.get(c) or "SIN_DATO")
@@ -257,7 +310,7 @@ def predecir_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "probabilidades": probs,
             "modelo_disponible": True,
             "fuente_prediccion": "mllib_pipeline_docker",
-            "modelo_motivo": "Predicción generada por PipelineModel MLlib con histórico y datos actuales de API."
+            "modelo_motivo": "Predicción generada por PipelineModel MLlib con histórico de la carretera y clima actual de OpenWeather. TomTom se integra en el score actual usado por el mapa."
         })
     return salida
 
@@ -315,6 +368,7 @@ def tiempo_real() -> Dict[str, Any]:
         "proveedor_trafico": "TomTom Traffic Flow actual",
         "proveedor_clima": "OpenWeather Current Weather actual",
         "proveedor_modelo": "Spark MLlib PipelineModel en Docker",
+        "flujo_prediccion": "Backend consulta TomTom/OpenWeather, calcula score actual, ejecuta PipelineModel con histórico + clima actual y devuelve todo al mapa.",
         "modo_actualizacion": "zonas",
         "cache_ttl_segundos": TIEMPO_REAL_CACHE_TTL,
         "requiere_env": {
